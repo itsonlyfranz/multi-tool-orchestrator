@@ -12,7 +12,7 @@ A LangGraph agent that plans a goal as a capability DAG, routes each step to the
 - **Deny-by-default permission scoping.** Role grants with glob matching, explicit denies, argument constraints (path containment that survives `..` and symlinks, numeric ranges, enums, regexes) and attenuating per-run scopes. The planner is only shown capabilities the principal may use, and the router re-checks every call with its real arguments.
 - **Measured parallelism.** In the demo environment (8 independent searches with a simulated 0.25 s I/O latency each) the run took 0.26 s wall-clock against 2.02 s of summed step time, a 7.8x speedup with peak concurrency 8 (numbers from a local run; reproduce with `orchestrator demo parallel`). Concurrency itself is proven deterministically in the tests with a `threading.Barrier` that only releases if three calls are truly in flight at once.
 - **Two kinds of conflict resolution.** *Resource* conflicts (two steps writing one file) are serialized in plan order by a lock manager with read/write claims; the order was checked over 15 repeated runs in the tests. *Result* conflicts (tools disagree) are reconciled by `priority`, `majority`, trust-`weighted` vote, `median`, or an LLM arbiter that falls back to weighted on a bad reply.
-- **Offline test suite.** 90 tests, no network and no API key: a scripted fake LLM, a LangChain fake chat model for the Claude adapter, and deterministic local tools.
+- **Offline test suite.** 95 tests, no network and no API key: a scripted fake LLM, a LangChain fake chat model for the Claude adapter, and deterministic local tools.
 
 ## Architecture
 
@@ -94,7 +94,7 @@ if result.status == "awaiting_approval":                  # graph paused at the 
 - **Capabilities, not tool names, in plans.** The LLM stays decoupled from the tool set, so tools can change at runtime and fallbacks are the router's job. Cost: a plan cannot pin a specific tool.
 - **LangGraph supersteps mean dependency waves.** All branches of a wave finish before the next `schedule` runs, so a fast step whose dependent is ready still waits for the slowest sibling. A free-running DAG scheduler would be tighter; the graph gives checkpoints, interrupts and an inspectable control flow in exchange.
 - **Sync nodes on threads, not asyncio.** Tools are ordinary blocking functions and the SQLite checkpointer is synchronous; LangGraph runs `Send` branches on a thread pool. Async tools are supported (each runs in its own event loop on a worker thread).
-- **Timeouts abandon, they don't kill.** Python cannot kill a thread, so a timed-out tool call keeps running in the background after the step fails over; mutual exclusion on a resource is released at that point. Tools with side effects should be idempotent or enforce their own timeouts.
+- **Timeouts abandon, they don't kill.** Python cannot kill a thread, so a timed-out tool call keeps running in the background. It keeps its resource claims until it actually returns, so later steps on the same resource wait behind it. A timed-out read is retried or falls back as usual; a timed-out write (declared `write` effect or write claim) fails the step without retry or fallback, so it is never issued twice. Tools with side effects should still enforce their own timeouts.
 - **Conflict order is plan order within a wave.** The scheduler announces each wave to the lock manager, which makes claim-holding steps wait for lower-ranked siblings that have not yet declared claims. Conservative (slight serialization) but deterministic. Claims come from the first tool tried; a fallback tool that touches different resources is not re-arbitrated against siblings already started.
 - **Deny by default, enforced twice.** The policy filters the planner's catalog (least privilege) and the router re-authorizes each call with its resolved arguments; tools additionally sandbox paths themselves. Permissions are role-based and in-process; there is no authentication layer.
 - **Reliability is a Laplace-smoothed success rate** so untried tools are neither favored nor shunned; explicit `priority` still overrides the score.
@@ -103,7 +103,7 @@ if result.status == "awaiting_approval":                  # graph paused at the 
 
 ## How the tests prove each capability
 
-Run `pytest` (90 tests, ~3 s, offline).
+Run `pytest` (~3 s, offline).
 
 | Capability | Tests | What they prove |
 |---|---|---|
@@ -120,6 +120,6 @@ Run `pytest` (90 tests, ~3 s, offline).
 ```
 src/orchestrator/   graph, orchestrator, planner, registry, router, permissions, step_runner,
                     resources, conflicts, llm, refs, audit, config, demo, cli, tools/
-tests/              90 offline tests          examples/policy.json   role/grant file format
+tests/              offline test suite        examples/policy.json   role/grant file format
 .env.example        environment variables     pyproject.toml         uv/pip compatible
 ```
