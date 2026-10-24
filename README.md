@@ -16,13 +16,75 @@ A LangGraph agent that plans a goal as a capability DAG, routes each step to the
 
 ## Architecture
 
+### Agent flow
+
+Generated from the compiled LangGraph graph by `python scripts/render_graph.py`; a test fails if it drifts. Dotted arrows are conditional edges.
+
+<!-- flow-diagram:start -->
+```mermaid
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	plan(plan)
+	plan_failed(plan_failed)
+	review(review)
+	schedule(schedule)
+	run_step(run_step)
+	synthesize(synthesize)
+	__end__([<p>__end__</p>]):::last
+	__start__ -.-> plan;
+	__start__ -.-> review;
+	plan -.-> plan_failed;
+	plan -.-> review;
+	review --> schedule;
+	run_step --> schedule;
+	schedule -.-> run_step;
+	schedule -.-> synthesize;
+	plan_failed --> __end__;
+	synthesize --> __end__;
+	plan -.-> plan;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc
 ```
-                         ┌────────────────────────── LangGraph StateGraph (graph.py) ─────────────────────────┐
- goal ──► plan ──ok──► review ──► schedule ──ready steps──► run_step ×N (parallel, via Send) ──┐
-           │ ▲  (interrupt:        │  ▲                                                          │
-  invalid  │ │   human approval)   │  └──────────────────────────────────────────────────────────┘
-           ▼ │ repair loop         └─ nothing left ──► synthesize ──► answer
-        plan_failed                                         
+<!-- flow-diagram:end -->
+
+How to read the conditional (dotted) transitions:
+
+- **`__start__` → `plan` or `review`:** a goal goes to `plan`; a caller-supplied ready-made plan skips straight to `review`.
+- **`plan` → `plan`:** the planner's JSON was rejected (invalid, cyclic or unknown capability), so the error is fed back and it retries, up to the repair budget.
+- **`plan` → `plan_failed`:** the repair budget is spent; the run ends with a "Planning failed" answer.
+- **`plan` → `review`:** a valid plan. `review` is where `interrupt` pauses for human approval of write-capable steps.
+- **`schedule` → `run_step`:** every step whose dependencies succeeded is dispatched at once, one parallel `Send` branch each; steps whose dependencies failed are marked skipped.
+- **`schedule` → `synthesize`:** nothing is left to run, so the answer is assembled.
+
+### Components
+
+```mermaid
+flowchart LR
+    CALLER["CLI / library caller"] --> ORCH["Orchestrator<br/>orchestrator.py"]
+    ORCH --> GRAPH["Agent graph<br/>graph.py"]
+    ORCH -. state .-> CKPT[("Checkpointer<br/>MemorySaver / SQLite")]
+    ORCH --> PLAN["Planner<br/>planner.py"]
+    GRAPH -->|plan node| PLAN
+    GRAPH -->|run_step node| RUN["Step runner<br/>step_runner.py"]
+    PLAN --> LLM["LLM interface<br/>llm.py"]
+    PLAN -->|permitted catalog| ROUTE["Router<br/>router.py"]
+    RUN --> ROUTE
+    RUN --> REF["Plan references<br/>refs.py"]
+    RUN --> RES["Resource manager<br/>resources.py"]
+    RUN -->|consensus steps| CONF["Conflict resolver<br/>conflicts.py"]
+    CONF -. LLM arbiter .-> LLM
+    ROUTE --> REG["Tool registry<br/>registry.py"]
+    ROUTE --> PERM["Permission policy<br/>permissions.py"]
+    RUN -->|call| TOOLS["Tools<br/>tools/builtin.py"]
+    REG -. holds .-> TOOLS
+    RUN -. events .-> AUDIT["Audit log<br/>audit.py"]
+    ORCH -. events .-> AUDIT
 ```
 
 | Component | File | Responsibility |
@@ -121,5 +183,6 @@ Run `pytest` (~3 s, offline).
 src/orchestrator/   graph, orchestrator, planner, registry, router, permissions, step_runner,
                     resources, conflicts, llm, refs, audit, config, demo, cli, tools/
 tests/              offline test suite        examples/policy.json   role/grant file format
+scripts/            render_graph.py regenerates the README flow diagram
 .env.example        environment variables     pyproject.toml         uv/pip compatible
 ```
