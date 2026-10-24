@@ -12,7 +12,7 @@ A LangGraph agent that plans a goal as a capability DAG, routes each step to the
 - **Deny-by-default permission scoping.** Role grants with glob matching, explicit denies, argument constraints (path containment that survives `..` and symlinks, numeric ranges, enums, regexes) and attenuating per-run scopes. The planner is only shown capabilities the principal may use, and the router re-checks every call with its real arguments.
 - **Measured parallelism.** In the demo environment (8 independent searches with a simulated 0.25 s I/O latency each) the run took 0.26 s wall-clock against 2.02 s of summed step time, a 7.8x speedup with peak concurrency 8 (numbers from a local run; reproduce with `orchestrator demo parallel`). Concurrency itself is proven deterministically in the tests with a `threading.Barrier` that only releases if three calls are truly in flight at once.
 - **Two kinds of conflict resolution.** *Resource* conflicts (two steps writing one file) are serialized in plan order by a lock manager with read/write claims; the order was checked over 15 repeated runs in the tests. *Result* conflicts (tools disagree) are reconciled by `priority`, `majority`, trust-`weighted` vote, `median`, or an LLM arbiter that falls back to weighted on a bad reply.
-- **Offline test suite.** 95 tests, no network and no API key: a scripted fake LLM, a LangChain fake chat model for the Claude adapter, and deterministic local tools.
+- **Offline test suite.** 97 tests, no network and no API key: a scripted fake LLM, a LangChain fake chat model for the Claude adapter, and deterministic local tools.
 
 ## Architecture
 
