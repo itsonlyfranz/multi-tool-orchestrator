@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[project]
+name = "multi-tool-orchestrator"
+version = "0.1.0"
+description = "Multi-tool orchestrator agent: dynamic tool registry, capability routing, permission scoping, parallel execution and conflict resolution."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.6,<3",
+    "langgraph>=1.0",
+    "langchain-anthropic>=1.0",
+    "langgraph-checkpoint-sqlite>=3.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+orchestrator = "orchestrator.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/orchestrator"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"
