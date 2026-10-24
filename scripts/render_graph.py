@@ -23,7 +23,7 @@ BLOCK_RE = re.compile(
     re.escape(START_MARK) + r"\s*```mermaid\n(?P<body>.*?)```\s*" + re.escape(END_MARK), re.DOTALL
 )
 NODE_RE = re.compile(r"^\s*(\w+)\s*[(\[]")
-EDGE_RE = re.compile(r"^\s*(\w+)\s*(?:-->|-\.->)(?:\|[^|]*\|)?\s*(\w+)\s*;?\s*$")
+EDGE_RE = re.compile(r"^\s*(\w+)\s*(?:-->|-\.->|--\s.*?\s-->|-\.\s.*?\s\.->)\s*(\w+)\s*;?\s*$")
 
 
 def compiled_graph():

@@ -29,6 +29,8 @@ def test_readme_flow_diagram_matches_the_compiled_graph():
 
 def test_parser_reads_labels_and_ignores_layout_lines():
     nodes, edges = render_graph.parse_mermaid(
-        "graph TD;\n\ta([<p>a</p>]):::first\n\tb(b)\n\ta -.-> b;\n\tb -- label --> a;\n\tb --> b;\n\tclassDef x fill:#fff\n"
+        "graph TD;\n\ta([<p>a</p>]):::first\n\tb(b)\n\tc(c)\n\ta -.-> b;\n\tb --> b;\n\tclassDef x fill:#fff\n"
+        "\tb -- &nbsp;done&nbsp; --> a;\n\ta -. &nbsp;retry&nbsp; .-> c;\n"
     )
-    assert nodes == {"a", "b"} and edges == {("a", "b"), ("b", "b")}
+    assert nodes == {"a", "b", "c"}
+    assert edges == {("a", "b"), ("b", "b"), ("b", "a"), ("a", "c")}
