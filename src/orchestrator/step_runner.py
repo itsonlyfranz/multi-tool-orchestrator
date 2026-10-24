@@ -188,6 +188,7 @@ class StepRunner:
 
     def _attempt(self, rt: RunRuntime, step: PlanStep, rank: int, tool: Tool, args: dict[str, Any]) -> Any:
         lease = rt.resources.acquire(step.id, rank, f"{step.id}/{tool.spec.name}", tool.claims(args))
+        future = None
         try:
             with rt.lock:
                 rt.active += 1
@@ -203,7 +204,10 @@ class StepRunner:
                 with rt.lock:
                     rt.active -= 1
         finally:
-            rt.resources.release(lease)
+            if future is None:
+                rt.resources.release(lease)
+            else:  # an abandoned call keeps its claims until it really finishes
+                future.add_done_callback(lambda _: rt.resources.release(lease))
 
     @staticmethod
     def _invoke(tool: Tool, args: dict[str, Any]) -> Any:

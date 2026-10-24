@@ -54,6 +54,13 @@ def test_llm_arbiter_chooses_and_bad_replies_fall_back_to_weighted():
     assert chosen.value == 1
 
 
+@pytest.mark.parametrize("strategy", ["majority", "weighted", "median"])
+def test_tied_groups_go_to_priority(strategy):
+    answers = [ans("low", "x"), ans("high", "y", priority=3)]
+    winner, report = ConflictResolver().resolve("s", answers, strategy)
+    assert winner.tool.spec.name == "high" and report.chosen_tool == "high"
+
+
 @pytest.mark.parametrize("strategy,expected", [("majority", 185.0), ("weighted", 187.42), ("priority", 187.42)])
 def test_consensus_step_end_to_end(registry, policy, admin, make_orchestrator, strategy, expected):
     orch = make_orchestrator()

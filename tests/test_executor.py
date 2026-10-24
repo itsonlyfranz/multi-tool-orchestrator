@@ -163,6 +163,28 @@ def test_step_timeout_fails_slow_tool_and_falls_back():
     assert r.tool == "fast" and r.fallbacks == ["slow"]
 
 
+def test_timed_out_writer_keeps_its_lock_until_it_finishes():
+    lock, state = threading.Lock(), {"writers": 0, "peak": 0}
+
+    def write(a):
+        with lock:
+            state["writers"] += 1
+            state["peak"] = max(state["peak"], state["writers"])
+        time.sleep(0.2)
+        with lock:
+            state["writers"] -= 1
+
+    tool = FunctionTool(
+        ToolSpec(name="w", description="d", capabilities=("res.write",), effect="write"),
+        write,
+        lambda a: [Claim(resource="doc", mode="write")],
+    )
+    orch, who = custom_orchestrator([tool], retries=1, step_timeout=0.05)
+    r = orch.execute_plan(plan(s("a", "res.write")), who).step("a")
+    assert r.status == StepStatus.FAILED and r.attempts == 2
+    assert state["peak"] == 1
+
+
 def test_async_tools_are_supported():
     async def aio(a):
         return "async-ok"

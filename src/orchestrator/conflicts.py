@@ -39,6 +39,10 @@ def _rank(answer: Answer) -> tuple[int, float, str]:
     return (spec.priority, spec.trust, spec.name)
 
 
+def _trust(group: list[Answer]) -> float:
+    return sum(a.tool.spec.trust for a in group)
+
+
 class ConflictResolver:
     """Groups equal answers, then picks a winner with the requested strategy.
 
@@ -69,9 +73,9 @@ class ConflictResolver:
         if strategy == "priority":
             winner = max(answers, key=_rank)
         elif strategy == "majority":
-            winner = max(max(g, key=_rank) for g in self._best_groups(groups, lambda g: float(len(g))))
+            winner = self._best(groups, lambda g: float(len(g)))
         elif strategy == "weighted":
-            winner = max(max(g, key=_rank) for g in self._best_groups(groups, lambda g: sum(a.tool.spec.trust for a in g)))
+            winner = self._best(groups, _trust)
         elif strategy == "median":
             winner, median_note = self._median(answers, groups)
             note = note or median_note
@@ -99,14 +103,15 @@ class ConflictResolver:
         return groups
 
     @staticmethod
-    def _best_groups(groups: list[list[Answer]], weight: Any) -> list[list[Answer]]:
+    def _best(groups: list[list[Answer]], weight: Any) -> Answer:
+        """Highest-ranked answer among the groups that tie for the largest ``weight``."""
         top = max(weight(g) for g in groups)
-        return [g for g in groups if math.isclose(weight(g), top)]
+        return max((a for g in groups if math.isclose(weight(g), top) for a in g), key=_rank)
 
     def _median(self, answers: list[Answer], groups: list[list[Answer]]) -> tuple[Answer, str]:
         numeric = all(isinstance(a.value, (int, float)) and not isinstance(a.value, bool) for a in answers)
         if not numeric:
-            winner = max(max(g, key=_rank) for g in self._best_groups(groups, lambda g: sum(a.tool.spec.trust for a in g)))
+            winner = self._best(groups, _trust)
             return winner, "non-numeric answers: used weighted"
         median = statistics.median(a.value for a in answers)
         by_rank = sorted(answers, key=_rank, reverse=True)  # min() keeps the first of equals
