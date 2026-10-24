@@ -1,0 +1,13 @@
+{
+  "roles": {
+    "admin": [{"effect": "allow"}],
+    "analyst": [
+      {"effect": "allow", "effects": ["read", "external"]},
+      {"effect": "allow", "capabilities": ["files.write"], "constraints": {"path": {"within": ["reports", "public"]}}}
+    ],
+    "reader": [
+      {"effect": "allow", "effects": ["read"]},
+      {"effect": "deny", "capabilities": ["files.*"], "effects": ["write"]}
+    ]
+  }
+}
