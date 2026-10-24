@@ -191,6 +191,23 @@ def test_timed_out_writer_is_not_repeated_and_keeps_its_lock_until_it_finishes()
     assert log == ["slow:start", "slow:end", "next"]
 
 
+def test_timed_out_write_effect_tool_without_claims_is_not_repeated():
+    calls = []
+
+    def slow(a):
+        calls.append("slow")
+        time.sleep(0.2)
+
+    tools = [
+        fn_tool("slow", "api.post", slow, effect="write", priority=5),
+        fn_tool("backup", "api.post", lambda a: calls.append("backup"), effect="write"),
+    ]
+    orch, who = custom_orchestrator(tools, retries=1, step_timeout=0.05)
+    r = orch.execute_plan(plan(s("a", "api.post")), who).step("a")
+    assert r.status == StepStatus.FAILED and r.attempts == 1 and "AbandonedWriteError" in r.error
+    assert calls == ["slow"]
+
+
 def test_async_tools_are_supported():
     async def aio(a):
         return "async-ok"

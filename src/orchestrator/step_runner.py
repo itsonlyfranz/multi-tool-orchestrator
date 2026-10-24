@@ -208,7 +208,7 @@ class StepRunner:
                     return future.result(timeout=self.step_timeout)
                 except TimeoutError:
                     future.cancel()
-                    writes = any(c.mode == "write" for c in lease.claims)
+                    writes = tool.spec.effect == "write" or any(c.mode == "write" for c in lease.claims)
                     error = AbandonedWriteError if writes else TimeoutError
                     raise error(f"timed out after {self.step_timeout}s") from None
             finally:
