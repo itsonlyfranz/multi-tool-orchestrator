@@ -163,26 +163,32 @@ def test_step_timeout_fails_slow_tool_and_falls_back():
     assert r.tool == "fast" and r.fallbacks == ["slow"]
 
 
-def test_timed_out_writer_keeps_its_lock_until_it_finishes():
-    lock, state = threading.Lock(), {"writers": 0, "peak": 0}
+def test_timed_out_writer_is_not_repeated_and_keeps_its_lock_until_it_finishes():
+    log = []
 
-    def write(a):
-        with lock:
-            state["writers"] += 1
-            state["peak"] = max(state["peak"], state["writers"])
-        time.sleep(0.2)
-        with lock:
-            state["writers"] -= 1
+    def slow(a):
+        log.append("slow:start")
+        time.sleep(0.3)
+        log.append("slow:end")
 
-    tool = FunctionTool(
-        ToolSpec(name="w", description="d", capabilities=("res.write",), effect="write"),
-        write,
-        lambda a: [Claim(resource="doc", mode="write")],
-    )
-    orch, who = custom_orchestrator([tool], retries=1, step_timeout=0.05)
-    r = orch.execute_plan(plan(s("a", "res.write")), who).step("a")
-    assert r.status == StepStatus.FAILED and r.attempts == 2
-    assert state["peak"] == 1
+    def writer(name, cap, fn, priority=0):
+        return FunctionTool(
+            ToolSpec(name=name, description="d", capabilities=(cap,), effect="write", priority=priority),
+            fn,
+            lambda a: [Claim(resource="doc", mode="write")],
+        )
+
+    tools = [
+        writer("slow", "res.write", slow, priority=5),
+        writer("backup", "res.write", lambda a: log.append("backup")),
+        writer("next", "res.next", lambda a: log.append("next")),
+    ]
+    orch, who = custom_orchestrator(tools, retries=1, step_timeout=0.05)
+    result = orch.execute_plan(plan(s("a", "res.write"), s("b", "res.next")), who)
+    a = result.step("a")
+    assert a.status == StepStatus.FAILED and a.attempts == 1 and "AbandonedWriteError" in a.error
+    assert result.step("b").status == StepStatus.OK
+    assert log == ["slow:start", "slow:end", "next"]
 
 
 def test_async_tools_are_supported():

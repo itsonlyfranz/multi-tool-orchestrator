@@ -25,6 +25,10 @@ from .resources import ResourceManager
 from .router import Router
 
 
+class AbandonedWriteError(TimeoutError):
+    """A write timed out but may still be running, so repeating it could apply it twice."""
+
+
 @dataclass(frozen=True)
 class RetryPolicy:
     retries: int = 1  # extra attempts per tool before falling back to the next candidate
@@ -120,13 +124,15 @@ class StepRunner:
         for tool in tools:
             name = tool.spec.name
             result.consulted.append(name)
-            ok, payload, attempts = self._try_tool(rt, step, rank, tool, args)
+            ok, payload, attempts, final = self._try_tool(rt, step, rank, tool, args)
             result.attempts += attempts
             if ok:
                 result.status, result.tool, result.value = StepStatus.OK, name, payload
                 return
             result.fallbacks.append(name)
             errors.append(f"{name}: {payload}")
+            if final:
+                break
             self.audit.record("step.fallback", rt.run_id, step=step.id, failed_tool=name, error=str(payload))
         result.error = "all candidate tools failed: " + "; ".join(errors)
 
@@ -137,7 +143,7 @@ class StepRunner:
             outcomes = list(pool.map(lambda t: self._try_tool(rt, step, rank, t, args), tools))
         answers: list[Answer] = []
         errors: list[str] = []
-        for tool, (ok, payload, attempts) in zip(tools, outcomes):
+        for tool, (ok, payload, attempts, _) in zip(tools, outcomes):
             result.consulted.append(tool.spec.name)
             result.attempts += attempts
             if ok:
@@ -160,7 +166,8 @@ class StepRunner:
     # -- one tool, with retries -----------------------------------------------------------------
     def _try_tool(
         self, rt: RunRuntime, step: PlanStep, rank: int, tool: Tool, args: dict[str, Any]
-    ) -> tuple[bool, Any, int]:
+    ) -> tuple[bool, Any, int, bool]:
+        """Return ``(ok, value or error, attempts, final)``; ``final`` forbids falling back."""
         name = tool.spec.name
         attempts = 0
         last: Exception | None = None
@@ -169,7 +176,7 @@ class StepRunner:
             try:
                 value = self._attempt(rt, step, rank, tool, args)
             except PermanentToolError as exc:  # caller's fault: no retry, tool health untouched
-                return False, f"{type(exc).__name__}: {exc}", attempts
+                return False, f"{type(exc).__name__}: {exc}", attempts, False
             except Exception as exc:
                 last = exc
                 self.registry.record_failure(name)
@@ -177,14 +184,16 @@ class StepRunner:
                     "tool.error", rt.run_id, step=step.id, tool=name, attempt=attempt + 1,
                     error=f"{type(exc).__name__}: {exc}",
                 )
+                if isinstance(exc, AbandonedWriteError):
+                    return False, f"{type(exc).__name__}: {exc}", attempts, True
                 if self.registry.circuit_open(name):
                     break  # stop hammering a tool the breaker just tripped
                 if attempt < self.retry.retries and self.retry.backoff:
                     time.sleep(self.retry.backoff * 2**attempt)
             else:
                 self.registry.record_success(name)
-                return True, value, attempts
-        return False, f"{type(last).__name__}: {last}", attempts
+                return True, value, attempts, False
+        return False, f"{type(last).__name__}: {last}", attempts, False
 
     def _attempt(self, rt: RunRuntime, step: PlanStep, rank: int, tool: Tool, args: dict[str, Any]) -> Any:
         lease = rt.resources.acquire(step.id, rank, f"{step.id}/{tool.spec.name}", tool.claims(args))
@@ -199,7 +208,9 @@ class StepRunner:
                     return future.result(timeout=self.step_timeout)
                 except TimeoutError:
                     future.cancel()
-                    raise TimeoutError(f"timed out after {self.step_timeout}s") from None
+                    writes = any(c.mode == "write" for c in lease.claims)
+                    error = AbandonedWriteError if writes else TimeoutError
+                    raise error(f"timed out after {self.step_timeout}s") from None
             finally:
                 with rt.lock:
                     rt.active -= 1
